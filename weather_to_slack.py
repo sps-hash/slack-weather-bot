@@ -65,7 +65,11 @@ def outfit_suggestion(tmin, tmax, pop, rain):
     return f"상의 - {top}\n하의 - {bottom}{addtxt}"
 
 def post_to_slack(text):
-    data = json.dumps({"text": text}).encode("utf-8")
+    payload = {
+        "mrkdwn": True,
+        "text": text
+    }
+    data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(WEBHOOK, data, headers={"Content-Type":"application/json"})
     urllib.request.urlopen(req)
 
@@ -81,10 +85,11 @@ def main():
     cond = describe_weather_kor(w["wcode"])
 
     text = (
-        f"좋은 아침입니다!{cond} 오늘의 서울 마포구 날씨를 알려드릴게요!\n"
+        f"좋은 아침입니다! {cond} 오늘의 서울 마포구 날씨를 알려드릴게요!\n"
         f"기온은 *최저 {w['tmin']}도 / 최고 {w['tmax']}도*이며, 날씨는 *{cond.split(' ')[1]}*입니다.\n\n"
         f"*오늘의 옷차림 추천 👕*\n"
-        f"{outfit_suggestion(w['tmin'], w['tmax'], w['pop'], w['rain'])}"
+        f"상의 - {outfit_suggestion(w['tmin'], w['tmax'], w['pop'], w['rain']).splitlines()[0].split('- ')[1]}\n"
+        f"하의 - {outfit_suggestion(w['tmin'], w['tmax'], w['pop'], w['rain']).splitlines()[1].split('- ')[1]}"
     )
 
     post_to_slack(text)
