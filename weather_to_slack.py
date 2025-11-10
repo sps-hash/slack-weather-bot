@@ -1,11 +1,9 @@
 import os, json, urllib.parse, urllib.request, datetime
 
-# ===== 설정 =====
-ADDRESS = "서울시 마포구 독막로 211"   # 기준 주소(출력은 안 함)
+ADDRESS = "서울시 마포구 독막로 211"
 TZ = "Asia/Seoul"
 WEBHOOK = os.environ["SLACK_WEBHOOK_URL"]
 
-# ===== 공용 유틸 =====
 def http_get(url, headers=None):
     req = urllib.request.Request(url, headers=headers or {})
     with urllib.request.urlopen(req, timeout=15) as r:
@@ -14,15 +12,13 @@ def http_get(url, headers=None):
 def geocode(address):
     q = urllib.parse.urlencode({"q": address, "format": "json", "limit": 1})
     url = f"https://nominatim.openstreetmap.org/search?{q}"
-    txt = http_get(url, headers={"User-Agent": "weather-bot"})
-    data = json.loads(txt)
-    lat = float(data[0]["lat"])
-    lon = float(data[0]["lon"])
-    return lat, lon
+    data = json.loads(http_get(url, headers={"User-Agent": "weather-bot"}))
+    return float(data[0]["lat"]), float(data[0]["lon"])
 
 def fetch_weather(lat, lon):
     params = {
-        "latitude": lat, "longitude": lon,
+        "latitude": lat,
+        "longitude": lon,
         "daily": "temperature_2m_max,temperature_2m_min,precipitation_sum,weathercode,precipitation_probability_max",
         "timezone": TZ,
     }
@@ -38,7 +34,6 @@ def fetch_weather(lat, lon):
     }
 
 def describe_weather_kor(code):
-    # 이모지 + 한글 설명 반환
     if code == 0: return "☀️ 맑음"
     if code in (1,2): return "🌤️ 구름 조금"
     if code == 3: return "☁️ 흐림"
@@ -50,7 +45,6 @@ def describe_weather_kor(code):
     return "변동성 있음"
 
 def outfit_suggestion(tmin, tmax, pop, rain):
-    # 상/하의와 추가 준비물까지 dict로 반환
     avg = (tmin + tmax) / 2
     if avg >= 28: top,bottom="얇은 반팔 티/린넨 셔츠","반바지"
     elif avg >= 23: top,bottom="반팔 또는 얇은 셔츠","가벼운 슬랙스"
@@ -71,11 +65,9 @@ def post_blocks_to_slack(blocks, fallback_text=""):
     req = urllib.request.Request(WEBHOOK, data, headers={"Content-Type":"application/json"})
     urllib.request.urlopen(req)
 
-# ===== 메인 =====
 def main():
-    # 주말 제외 (토:5, 일:6)
     today = datetime.date.today()
-    if today.weekday() >= 5:
+    if today.weekday() >= 5:  # 주말 제외
         return
 
     lat, lon = geocode(ADDRESS)
@@ -83,12 +75,11 @@ def main():
     cond = describe_weather_kor(w["wcode"])
     cond_emoji = cond.split(" ")[0] if " " in cond else ""
     cond_text  = cond.split(" ", 1)[1] if " " in cond else cond
-
     outfit = outfit_suggestion(w["tmin"], w["tmax"], w["pop"], w["rain"])
 
-    # --- Block Kit 구성 ---
+    # 카드형 메시지 블록
     header_text = "오늘의 날씨 • 서울 마포구"
-    intro = f"좋은 아침입니다! {cond} 오늘의 서울 마포구 날씨를 알려드릴게요!"
+    intro = f"좋은 아침입니다! {cond_emoji} 오늘의 서울 마포구 날씨를 알려드릴게요!"
 
     fields = [
         {"type":"mrkdwn", "text": f"*최저*\n{w['tmin']}°C"},
@@ -96,7 +87,6 @@ def main():
         {"type":"mrkdwn", "text": f"*날씨*\n{cond_text}"},
         {"type":"mrkdwn", "text": f"*강수확률*\n{w['pop']}%"},
     ]
-    # 강수량 정보가 0이 아닐 때만 표시
     if w["rain"] and round(w["rain"],1) != 0:
         fields.append({"type":"mrkdwn", "text": f"*강수량*\n{round(w['rain'],1)} mm"})
 
