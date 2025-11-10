@@ -75,7 +75,7 @@ def main():
     line2 = f"기온은 최저 {w['tmin']}도, 최고 {w['tmax']}도이며, 날씨는 {cond}입니다."
     line3 = f"오늘의 옷차림 추천 👕\n{outfit_suggestion(w['tmin'], w['tmax'], w['pop'], w['rain'])}"
     today = datetime.date.today().strftime("%Y-%m-%d")
-    text = f"{line1}\n{line2}\n\n{line3}\n\n({today} · 기준 주소: {ADDRESS})"
+    text = f"{line1}\n{line2}\n\n{line3}\n\n(기준 주소 : {ADDRESS})"
     post_to_slack(text)
 
 if __name__ == "__main__":
