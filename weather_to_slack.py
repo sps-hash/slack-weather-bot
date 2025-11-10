@@ -60,23 +60,4 @@ def outfit_suggestion(tmin, tmax, pop, rain):
     if pop >= 60 or rain >= 1: addon.append("우산")
     if tmax - tmin >= 10: addon.append("얇은 겉옷")
     addtxt=f"\n추가 준비물: {', '.join(addon)}" if addon else ""
-    return f"상의 - {top}\n하의 - {bottom}{addtxt}"
-
-def post_to_slack(text):
-    data = json.dumps({"text": text}).encode("utf-8")
-    req = urllib.request.Request(WEBHOOK, data, headers={"Content-Type":"application/json"})
-    urllib.request.urlopen(req)
-
-def main():
-    lat, lon = geocode(ADDRESS)
-    w = fetch_weather(lat, lon)
-    cond = describe_weather_kor(w["wcode"])
-    line1 = f"좋은 아침입니다 🌤️ 오늘의 서울 마포구 날씨를 알려드릴게요!"
-    line2 = f"기온은 최저 {w['tmin']}도, 최고 {w['tmax']}도이며, 날씨는 {cond}입니다."
-    line3 = f"오늘의 옷차림 추천 👕\n{outfit_suggestion(w['tmin'], w['tmax'], w['pop'], w['rain'])}"
-    today = datetime.date.today().strftime("%Y-%m-%d")
-    text = f"{line1}\n{line2}\n\n{line3}\n\n(기준 주소 : {ADDRESS})"
-    post_to_slack(text)
-
-if __name__ == "__main__":
-    main()
+    retu
