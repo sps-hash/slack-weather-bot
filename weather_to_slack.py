@@ -1,6 +1,6 @@
 import os, json, urllib.parse, urllib.request, datetime
 
-ADDRESS = "서울시 마포구 독막로 211"
+ADDRESS = "서울 마포구"
 TZ = "Asia/Seoul"
 WEBHOOK = os.environ["SLACK_WEBHOOK_URL"]
 
@@ -26,92 +26,78 @@ def fetch_weather(lat, lon):
     data = json.loads(http_get(url))
     d = data["daily"]
     return {
-        "tmax": round(d["temperature_2m_max"][0]),
-        "tmin": round(d["temperature_2m_min"][0]),
-        "rain": d["precipitation_sum"][0],
+        "tmin": d["temperature_2m_min"][0],
+        "tmax": d["temperature_2m_max"][0],
         "wcode": d["weathercode"][0],
         "pop": d["precipitation_probability_max"][0],
+        "rain": d["precipitation_sum"][0],
     }
 
 def describe_weather_kor(code):
-    if code == 0: return "☀️ 맑음"
-    if code in (1,2): return "🌤️ 구름 조금"
-    if code == 3: return "☁️ 흐림"
-    if code in (45,48): return "🌫️ 안개"
-    if code in (51,53,55,56,57): return "🌦️ 이슬비"
-    if code in (61,63,65,66,67): return "🌧️ 비"
-    if code in (80,81,82): return "🌦️ 소나기"
-    if code in (95,96,99): return "⛈️ 뇌우"
-    return "변동성 있음"
+    mapping = {
+        0: "☀️ 맑음", 1: "🌤️ 대체로 맑음", 2: "⛅ 구름 조금", 3: "☁️ 흐림",
+        45: "🌫️ 안개", 48: "🌫️ 서리 낀 안개",
+        51: "🌦️ 약한 이슬비", 61: "🌧️ 약한 비", 63: "🌧️ 비", 65: "🌧️ 강한 비",
+        71: "🌨️ 약한 눈", 73: "🌨️ 눈", 75: "❄️ 강한 눈",
+        95: "⛈️ 뇌우", 99: "⛈️ 우박을 동반한 뇌우"
+    }
+    return mapping.get(code, "🌈 알 수 없음")
 
 def outfit_suggestion(tmin, tmax, pop, rain):
     avg = (tmin + tmax) / 2
-    if avg >= 28: top,bottom="얇은 반팔 티/린넨 셔츠","반바지"
-    elif avg >= 23: top,bottom="반팔 또는 얇은 셔츠","가벼운 슬랙스"
-    elif avg >= 20: top,bottom="얇은 가디건/셔츠","청바지"
-    elif avg >= 17: top,bottom="가벼운 자켓/니트","면바지"
-    elif avg >= 12: top,bottom="얇은 코트/자켓 + 니트","긴바지"
-    elif avg >= 9:  top,bottom="코트/두꺼운 가디건","기모 바지"
-    elif avg >= 5:  top,bottom="두꺼운 코트 + 니트","기모 바지"
-    else: top,bottom="패딩/목도리/장갑","내복 + 긴바지"
-    extras=[]
-    if pop >= 60 or rain >= 1: extras.append("☂️ 우산")
-    if (tmax - tmin) >= 10:   extras.append("🧥 얇은 겉옷")
-    return {"top": top, "bottom": bottom, "extras": extras}
+    if rain > 0 or pop >= 60:
+        extra = "\n추가 준비물: ☂️ 우산"
+    else:
+        extra = ""
+    if avg >= 25:
+        return f"상의 - 반팔 + 얇은 셔츠\n하의 - 반바지{extra}"
+    elif avg >= 20:
+        return f"상의 - 얇은 셔츠 + 가디건\n하의 - 면바지{extra}"
+    elif avg >= 10:
+        return f"상의 - 두꺼운 코트 + 니트\n하의 - 기모 바지{extra}"
+    elif avg >= 0:
+        return f"상의 - 패딩 + 스웨터\n하의 - 기모 바지{extra}"
+    else:
+        return f"상의 - 두꺼운 패딩 + 목도리\n하의 - 히트텍{extra}"
 
-def post_blocks_to_slack(blocks, fallback_text=""):
-    payload = {"mrkdwn": True, "text": fallback_text, "blocks": blocks}
-    data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(WEBHOOK, data, headers={"Content-Type":"application/json"})
+def post_to_slack(text):
+    data = json.dumps({"text": text}).encode("utf-8")
+    req = urllib.request.Request(WEBHOOK, data=data, headers={"Content-Type": "application/json"})
     urllib.request.urlopen(req)
 
 def main():
-    today = datetime.date.today()
-    if today.weekday() >= 5:  # 주말 제외
+    # 🗓️ 주말 제외 (토/일에는 실행 안 함)
+    today = datetime.datetime.now().date()
+    if today.weekday() >= 5:
+        print("주말이므로 전송 안 함")
         return
 
     lat, lon = geocode(ADDRESS)
     w = fetch_weather(lat, lon)
+
     cond = describe_weather_kor(w["wcode"])
     cond_emoji = cond.split(" ")[0] if " " in cond else ""
-    cond_text  = cond.split(" ", 1)[1] if " " in cond else cond
+    cond_text = cond.split(" ", 1)[1] if " " in cond else cond
     outfit = outfit_suggestion(w["tmin"], w["tmax"], w["pop"], w["rain"])
 
-    # 카드형 메시지 블록
-    header_text = "오늘의 날씨 • 서울 마포구"
-    intro = f"좋은 아침입니다! {cond_emoji} 오늘의 서울 마포구 날씨를 알려드릴게요!"
+    # 🌤️ 줄바꿈 적용된 인사 문구
+    intro = f"좋은 아침입니다! {cond_emoji}\n오늘의 서울 마포구 날씨를 알려드릴게요!"
 
-    fields = [
-        {"type":"mrkdwn", "text": f"*최저*\n{w['tmin']}°C"},
-        {"type":"mrkdwn", "text": f"*최고*\n{w['tmax']}°C"},
-        {"type":"mrkdwn", "text": f"*날씨*\n{cond_text}"},
-        {"type":"mrkdwn", "text": f"*강수확률*\n{w['pop']}%"},
-    ]
-    if w["rain"] and round(w["rain"],1) != 0:
-        fields.append({"type":"mrkdwn", "text": f"*강수량*\n{round(w['rain'],1)} mm"})
+    message = f"""
+{intro}
 
-    outfit_lines = [
-        "*오늘의 옷차림 추천 👕*",
-        f"상의 - {outfit['top']}",
-        f"하의 - {outfit['bottom']}"
-    ]
-    if outfit["extras"]:
-        outfit_lines.append(f"추가 준비물: {', '.join(outfit['extras'])}")
+*최저* {w['tmin']}°C  *최고* {w['tmax']}°C
+*날씨* {cond_text}  *강수확률* {w['pop']}%
 
-    blocks = [
-        {"type":"header", "text":{"type":"plain_text", "text": header_text, "emoji": True}},
-        {"type":"section", "text":{"type":"mrkdwn", "text": intro}},
-        {"type":"section", "fields": fields},
-        {"type":"divider"},
-        {"type":"section", "text":{"type":"mrkdwn", "text": "\n".join(outfit_lines)}},
-        {"type":"context", "elements":[
-            {"type":"mrkdwn", "text":"매일 *07:30* 자동 발송 · 주말 제외"},
-            {"type":"mrkdwn", "text":"데이터: Open-Meteo"}
-        ]}
-    ]
+———————————————
+*오늘의 옷차림 추천 👕*
+{outfit}
 
-    fallback = f"{cond_emoji} 최저 {w['tmin']} / 최고 {w['tmax']} · {cond_text}"
-    post_blocks_to_slack(blocks, fallback_text=fallback)
+_매일 07:30 자동 발송 · 주말 제외_  
+_데이터: Open-Meteo_
+"""
+    post_to_slack(message)
+    print("전송 완료 ✅")
 
 if __name__ == "__main__":
     main()
