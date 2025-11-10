@@ -1,8 +1,8 @@
 import os, json, urllib.parse, urllib.request, datetime
 
 # ===== 설정 =====
-ADDRESS = "서울시 마포구 독막로 211"   # 기준 주소
-TZ = "Asia/Seoul"                      # 시간대
+ADDRESS = "서울시 마포구 독막로 211"
+TZ = "Asia/Seoul"
 WEBHOOK = os.environ["SLACK_WEBHOOK_URL"]
 
 # ===== 공용 유틸 =====
@@ -38,14 +38,14 @@ def fetch_weather(lat, lon):
     }
 
 def describe_weather_kor(code):
-    if code == 0: return "맑음"
-    if code in (1,2): return "구름 조금"
-    if code == 3: return "흐림"
-    if code in (45,48): return "안개"
-    if code in (51,53,55,56,57): return "이슬비"
-    if code in (61,63,65,66,67): return "비"
-    if code in (80,81,82): return "소나기"
-    if code in (95,96,99): return "뇌우"
+    if code == 0: return "☀️ 맑음"
+    if code in (1,2): return "🌤️ 구름 조금"
+    if code == 3: return "☁️ 흐림"
+    if code in (45,48): return "🌫️ 안개"
+    if code in (51,53,55,56,57): return "🌦️ 이슬비"
+    if code in (61,63,65,66,67): return "🌧️ 비"
+    if code in (80,81,82): return "🌦️ 소나기"
+    if code in (95,96,99): return "⛈️ 뇌우"
     return "변동성 있음"
 
 def outfit_suggestion(tmin, tmax, pop, rain):
@@ -59,8 +59,8 @@ def outfit_suggestion(tmin, tmax, pop, rain):
     elif avg >= 5:  top,bottom="두꺼운 코트 + 니트","기모 바지"
     else: top,bottom="패딩/목도리/장갑","내복 + 긴바지"
     addon=[]
-    if pop >= 60 or rain >= 1: addon.append("우산")
-    if tmax - tmin >= 10: addon.append("얇은 겉옷")
+    if pop >= 60 or rain >= 1: addon.append("☂️ 우산")
+    if tmax - tmin >= 10: addon.append("🧥 얇은 겉옷")
     addtxt=f"\n추가 준비물: {', '.join(addon)}" if addon else ""
     return f"상의 - {top}\n하의 - {bottom}{addtxt}"
 
@@ -69,9 +69,9 @@ def post_to_slack(text):
     req = urllib.request.Request(WEBHOOK, data, headers={"Content-Type":"application/json"})
     urllib.request.urlopen(req)
 
-# ===== 메인 로직 =====
+# ===== 메인 =====
 def main():
-    # --- 주말 제외: 토(5), 일(6)에는 아무것도 보내지 않음 ---
+    # 주말 제외 (토:5, 일:6)
     today = datetime.date.today()
     if today.weekday() >= 5:
         return
@@ -80,11 +80,13 @@ def main():
     w = fetch_weather(lat, lon)
     cond = describe_weather_kor(w["wcode"])
 
-    line1 = "좋은 아침입니다 🌤️ 오늘의 서울 마포구 날씨를 알려드릴게요!"
-    line2 = f"기온은 최저 {w['tmin']}도, 최고 {w['tmax']}도이며, 날씨는 {cond}입니다."
-    line3 = f"오늘의 옷차림 추천 👕\n{outfit_suggestion(w['tmin'], w['tmax'], w['pop'], w['rain'])}"
+    text = (
+        f"좋은 아침입니다!{cond} 오늘의 서울 마포구 날씨를 알려드릴게요!\n"
+        f"기온은 *최저 {w['tmin']}도 / 최고 {w['tmax']}도*이며, 날씨는 *{cond.split(' ')[1]}*입니다.\n\n"
+        f"*오늘의 옷차림 추천 👕*\n"
+        f"{outfit_suggestion(w['tmin'], w['tmax'], w['pop'], w['rain'])}"
+    )
 
-    text = f"{line1}\n{line2}\n\n{line3}\n\n───────────────\n📍 기준 주소 : {ADDRESS}"
     post_to_slack(text)
 
 if __name__ == "__main__":
