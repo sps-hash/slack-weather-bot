@@ -1,9 +1,11 @@
 import os, json, urllib.parse, urllib.request, datetime
 
-ADDRESS = "서울시 마포구 독막로 211"
-TZ = "Asia/Seoul"
+# ===== 설정 =====
+ADDRESS = "서울시 마포구 독막로 211"   # 기준 주소
+TZ = "Asia/Seoul"                      # 시간대
 WEBHOOK = os.environ["SLACK_WEBHOOK_URL"]
 
+# ===== 공용 유틸 =====
 def http_get(url, headers=None):
     req = urllib.request.Request(url, headers=headers or {})
     with urllib.request.urlopen(req, timeout=15) as r:
@@ -60,4 +62,30 @@ def outfit_suggestion(tmin, tmax, pop, rain):
     if pop >= 60 or rain >= 1: addon.append("우산")
     if tmax - tmin >= 10: addon.append("얇은 겉옷")
     addtxt=f"\n추가 준비물: {', '.join(addon)}" if addon else ""
-    retu
+    return f"상의 - {top}\n하의 - {bottom}{addtxt}"
+
+def post_to_slack(text):
+    data = json.dumps({"text": text}).encode("utf-8")
+    req = urllib.request.Request(WEBHOOK, data, headers={"Content-Type":"application/json"})
+    urllib.request.urlopen(req)
+
+# ===== 메인 로직 =====
+def main():
+    # --- 주말 제외: 토(5), 일(6)에는 아무것도 보내지 않음 ---
+    today = datetime.date.today()
+    if today.weekday() >= 5:
+        return
+
+    lat, lon = geocode(ADDRESS)
+    w = fetch_weather(lat, lon)
+    cond = describe_weather_kor(w["wcode"])
+
+    line1 = "좋은 아침입니다 🌤️ 오늘의 서울 마포구 날씨를 알려드릴게요!"
+    line2 = f"기온은 최저 {w['tmin']}도, 최고 {w['tmax']}도이며, 날씨는 {cond}입니다."
+    line3 = f"오늘의 옷차림 추천 👕\n{outfit_suggestion(w['tmin'], w['tmax'], w['pop'], w['rain'])}"
+
+    text = f"{line1}\n{line2}\n\n{line3}\n\n───────────────\n📍 기준 주소 : {ADDRESS}"
+    post_to_slack(text)
+
+if __name__ == "__main__":
+    main()
