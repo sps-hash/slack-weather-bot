@@ -1,19 +1,24 @@
-name: Post Weather to Slack (KST 07:30)
+name: Weather to Slack
 
 on:
   schedule:
-    - cron: "30 22 * * *"   # 매일 오전 7:30 (KST 기준)
-  workflow_dispatch: {}      # 수동 실행 버튼 추가
+    # KST 07:30 == UTC 22:30 (전날)
+    # 월~금(KST) → 일~목(UTC)
+    - cron: '30 22 * * 0-4'
+  workflow_dispatch: {}
 
 jobs:
   run:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          python-version: "3.x"
-      - name: Run weather bot
+          python-version: '3.11'
+      - name: Install deps (if any)
+        run: pip install -r requirements.txt || true
+      - name: Run bot
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: python weather_to_slack.py
