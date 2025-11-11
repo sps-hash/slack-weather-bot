@@ -4,7 +4,7 @@ on:
   schedule:
     # KST 07:30 == UTC 22:30 (전날)
     # 월~금(KST) → 일~목(UTC)
-    - cron: '30 22 * * 0-4'
+    - cron: "30 22 * * 0-4"
   workflow_dispatch: {}
 
 jobs:
@@ -12,13 +12,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-      - name: Install deps (if any)
-        run: pip install -r requirements.txt || true
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests
+
       - name: Run bot
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-        run: python weather_to_slack.py
+        run: |
+          python weather_to_slack.py
