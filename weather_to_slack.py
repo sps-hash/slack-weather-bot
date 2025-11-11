@@ -1,15 +1,16 @@
 # weather_to_slack.py
-# 포맷 유지: 인사(2줄) → [최저/최고/날씨/강수확률(+강수량)] → ───────── → 오늘의 옷차림(상의/하의) → 추가 팁
-# 옷차림 기준: 최저기온 버킷(B1~B10) + 일교차/계절/날씨/민감도 보정
-# 흐림/바람 코멘트 최신 반영:
-# - 흐림: "햇볕이 약해 체감온도가 낮아 더 추울 수 있어요!"
-# - 바람: "목도리나 머플러로 체감온도를 높이세요."
+# 포맷: 인사(2줄) → [최저/최고/날씨/강수확률(+강수량)] → ───────── → 오늘의 옷차림(상의/하의) → 💡 추가 팁(☑️ bullets)
+# 기준: 최저기온 버킷(B1~B10) + 일교차/계절/날씨 보정
+# 수정사항 반영:
+# - "레이어/아이템" 출력 제거
+# - "추가 팁 -" → "💡 추가 팁"
+# - bullet을 "-"가 아닌 "☑️" 이모지로 출력
 
 import os, json, urllib.parse, urllib.request, datetime as dt
 
-ADDRESS = "서울 마포구"                 # 지오코딩 입력
+ADDRESS = "서울 마포구"  # 지오코딩 입력
 TZ = "Asia/Seoul"
-WEBHOOK = os.environ["SLACK_WEBHOOK_URL"]  # Slack Incoming Webhook (Secrets)
+WEBHOOK = os.environ["SLACK_WEBHOOK_URL"]  # Slack Incoming Webhook (GitHub Secrets)
 
 # ---------------- HTTP ----------------
 def http_get(url, headers=None):
@@ -135,7 +136,7 @@ def apparent_adjust(min_temp: int, flags: set):
 def adjust_bucket_by_apparent(bucket_code: str, min_temp: int, flags: set):
     apparent, adj = apparent_adjust(min_temp, flags)
     idx = BUCKET_ORDER.index(bucket_code)
-    # ±1 단계 내 미세 조정
+    # ±1 단계 미세 조정
     if apparent < min_temp - 1:
         idx = max(0, idx - 1)
     elif apparent > min_temp + 1:
@@ -144,10 +145,8 @@ def adjust_bucket_by_apparent(bucket_code: str, min_temp: int, flags: set):
 
 def apply_sensitivity(bucket_code: str, cold_sensitivity: int):
     idx = BUCKET_ORDER.index(bucket_code)
-    if cold_sensitivity > 0:
-        idx = max(0, idx - 1)  # 더 따뜻하게
-    elif cold_sensitivity < 0:
-        idx = min(len(BUCKET_ORDER)-1, idx + 1)  # 더 가볍게
+    if cold_sensitivity > 0:   idx = max(0, idx - 1)             # 더 따뜻하게
+    elif cold_sensitivity < 0: idx = min(len(BUCKET_ORDER)-1, idx + 1)  # 더 가볍게
     return BUCKET_ORDER[idx]
 
 # -------------- Comments ----------------
@@ -184,10 +183,9 @@ def recommend_outfit(min_t: int, max_t: int, season: str, flags: set, user_prefs
     final_bucket = apply_sensitivity(adj_bucket, cold_sensitivity)
 
     code, lo, hi, base, bottom, layers, acc, shoe, label = bucket_info(final_bucket)
-
     delta = max_t - min_t
-    comments = []
 
+    comments = []
     dc = delta_comment(delta, min_t, max_t)
     if carry_pref == 1:
         dc = "겉옷 휴대 추천. " + dc
@@ -204,9 +202,6 @@ def recommend_outfit(min_t: int, max_t: int, season: str, flags: set, user_prefs
         "headline": f"오늘 최저 {min_t}℃ / 최고 {max_t}℃ — {label}",
         "top_text": ", ".join(base),
         "bottom_text": bottom,
-        "layers": layers,
-        "accessories": acc,
-        "footwear": shoe,
         "comments": comments,
         "debug": debug
     }
@@ -222,7 +217,7 @@ def post_blocks_to_slack(blocks, fallback=""):
 
 # ------------------- Main ----------------
 def main():
-    # 주말 스킵
+    # 주말 스킵 (월=0 … 일=6)
     if dt.date.today().weekday() >= 5:
         print("Weekend skip")
         return
@@ -237,17 +232,14 @@ def main():
     cond_emoji = cond.split(" ")[0] if " " in cond else ""
     cond_text  = cond.split(" ", 1)[1] if " " in cond else cond
 
-    user_prefs = {
-        "cold_sensitivity": 0,  # -2 ~ +2
-        "carry_preference": 1,  # 겉옷 휴대 코멘트 강화
-    }
+    user_prefs = {"cold_sensitivity": 0, "carry_preference": 1}
 
     rec = recommend_outfit(w["tmin"], w["tmax"], season, flags, user_prefs)
 
-    # 인사 2줄 (포맷 유지)
+    # 인사 2줄
     intro = f"좋은 아침입니다! {cond_emoji}\n오늘의 서울 마포구 날씨를 알려드릴게요!"
 
-    # 필드(포맷 유지)
+    # 필드
     fields = [
         {"type":"mrkdwn", "text": "*최저*\n" + f"{w['tmin']}°C"},
         {"type":"mrkdwn", "text": "*최고*\n" + f"{w['tmax']}°C"},
@@ -257,26 +249,17 @@ def main():
     if round(w["rain"], 1) > 0:
         fields.append({"type":"mrkdwn", "text": "*강수량*\n" + f"{round(w['rain'],1)} mm"})
 
-    # 옷차림 섹션 (포맷 유지)
+    # 옷차림 (레이어/아이템 제거)
     outfit_lines = [
         "*오늘의 옷차림 추천 👕*",
         f"상의 - {rec['top_text']}",
         f"하의 - {rec['bottom_text']}",
     ]
-    tips = []
-    if rec["layers"]:
-        tips.append("레이어: " + ", ".join(rec["layers"]))
-    extra_items = []
-    if rec["accessories"]: extra_items += rec["accessories"]
-    if rec["footwear"]:    extra_items += [rec["footwear"]]
-    if extra_items:
-        tips.append("아이템: " + ", ".join(extra_items))
+
+    # 💡 추가 팁 (이모지 bullet ☑️)
     if rec["comments"]:
-        core = rec["comments"][:2]
-        others = rec["comments"][2:]
-        tips.append("추가 팁: " + " / ".join(core + (others[:1] if others else [])))
-    if tips:
-        outfit_lines += tips
+        comment_lines = "\n".join([f"☑️ {c}" for c in rec["comments"][:3]])
+        outfit_lines.append(f"💡 추가 팁\n{comment_lines}")
 
     blocks = [
         {"type":"section", "text":{"type":"mrkdwn", "text": intro}},
