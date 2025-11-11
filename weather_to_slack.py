@@ -1,28 +1,30 @@
 # weather_to_slack.py
-# - 평일 자동 발송(주말 스킵). 슬랙 메시지 포맷 유지:
-#   인사(2줄) → [최저/최고/날씨/강수확률(+강수량)] 필드 → "오늘의 옷차림 추천" (상의/하의) → 추가 팁
-# - 설계서 반영: 최저기온 버킷(B1~B10) + 일교차/계절/날씨/민감도 보정
+# 포맷 유지: 인사(2줄) → [최저/최고/날씨/강수확률(+강수량)] → ───────── → 오늘의 옷차림(상의/하의) → 추가 팁
+# 옷차림 기준: 최저기온 버킷(B1~B10) + 일교차/계절/날씨/민감도 보정
+# 흐림/바람 코멘트 최신 반영:
+# - 흐림: "햇볕이 약해 체감온도가 낮아 더 추울 수 있어요!"
+# - 바람: "목도리나 머플러로 체감온도를 높이세요."
 
 import os, json, urllib.parse, urllib.request, datetime as dt
 
-ADDRESS = "서울 마포구"
+ADDRESS = "서울 마포구"                 # 지오코딩 입력
 TZ = "Asia/Seoul"
-WEBHOOK = os.environ["SLACK_WEBHOOK_URL"]
+WEBHOOK = os.environ["SLACK_WEBHOOK_URL"]  # Slack Incoming Webhook (Secrets)
 
-# ---------------- HTTP utils ----------------
+# ---------------- HTTP ----------------
 def http_get(url, headers=None):
     req = urllib.request.Request(url, headers=headers or {})
     with urllib.request.urlopen(req, timeout=20) as r:
         return r.read().decode("utf-8")
 
-# --------------- Geocode (OSM) --------------
+# --------------- Geocoding ------------
 def geocode(address: str):
     q = urllib.parse.urlencode({"q": address, "format": "json", "limit": 1})
     url = f"https://nominatim.openstreetmap.org/search?{q}"
     data = json.loads(http_get(url, headers={"User-Agent": "slack-weather-bot"}))
     return float(data[0]["lat"]), float(data[0]["lon"])
 
-# ------- Weather (Open-Meteo Daily API) -----
+# --------------- Weather --------------
 def fetch_weather(lat: float, lon: float):
     params = {
         "latitude": lat,
@@ -48,15 +50,15 @@ def fetch_weather(lat: float, lon: float):
         "wind": float(d["windspeed_10m_max"][0]),            # m/s
     }
 
-# ------------ Season / WMO mapping ----------
-def season_from_date(today: dt.date, locale="ko"):
+# --------------- Season ---------------
+def season_from_date(today: dt.date):
     m = today.month
-    # 북반구 기준: 3~5 봄, 6~8 여름, 9~11 가을, 12~2 겨울
     if m in (3,4,5):   return "spring"
     if m in (6,7,8):   return "summer"
     if m in (9,10,11): return "autumn"
     return "winter"
 
+# ----------- Weather text -------------
 def describe_weather_kor(code: int):
     mapping = {
         0: "☀️ 맑음", 1: "🌤️ 대체로 맑음", 2: "⛅ 구름 조금", 3: "☁️ 흐림",
@@ -80,22 +82,19 @@ def flags_from_wmo(wcode: int, pop: int, rain: float, wind: float, tmin: int, tm
     # 구름/맑음
     if wcode in (3,45,48): flags.add("cloudy")
     if wcode in (0,1,2):   flags.add("clear")
-    # 바람 (대략적 임계)
-    if wind >= 8.0:  # 약풍~강풍 경계
+    # 바람(간단 임계)
+    if wind >= 8.0:
         flags.add("windy")
-    # 습함/UV(근사치): 여름·고온이면 가중
+    # 습/UV/건조(근사치)
     if season == "summer" and tmin >= 20:
         flags.add("humid")
-        if tmax >= 28:
-            flags.add("uv_high")
-    # 건조(근사치): 한겨울 저온
+        if tmax >= 28: flags.add("uv_high")
     if season == "winter" and tmin <= 5:
         flags.add("dry")
     return flags
 
-# -------- Rules (Buckets & Outputs ko) ------
+# ----------- Buckets (min temp) -----------
 BUCKETS = [
-    # code, lo, hi, base(top 중심), bottom, layers, acc, shoe, label
     ("B1", -100, -5, ["롱패딩","히트텍 상하","니트"],        "기모 바지/방한 팬츠", ["기모내의","넥워머"], ["방한장갑","귀마개"], "방한부츠", "한파 보온 최우선"),
     ("B2", -4, 0,    ["두꺼운 패딩/울코트","니트"],          "기모 바지",          ["내복"],             ["목도리"],         "기모 안감 신발", "매우 추움"),
     ("B3", 1, 5,     ["울코트/가죽자켓","니트"],             "기모/두툼 바지",      ["보온 이너"],         [],                "방풍 스니커즈", "겨울 코트 시즌"),
@@ -107,7 +106,6 @@ BUCKETS = [
     ("B9", 23, 26,   ["반팔/반바지/원피스"],                 "흡습속건 팬츠/반바지",  ["흡습속건 이너"],      ["선크림"],         "샌들/스니커즈","여름 캐주얼"),
     ("B10",27,100,   ["민소매/반팔/린넨"],                   "아주 가벼운 하의",      ["초경량"],            ["모자","선글라스"], "샌들",        "한여름 초경량"),
 ]
-
 BUCKET_ORDER = [b[0] for b in BUCKETS]
 
 def pick_bucket(min_temp: int):
@@ -122,7 +120,7 @@ def bucket_info(code: str):
             return b
     return BUCKETS[-1]
 
-# --------- Apparent & Adjustments ----------
+# ----------- Apparent & adjust -----------
 def apparent_adjust(min_temp: int, flags: set):
     adj = 0
     if "windy" in flags:  adj -= 2
@@ -136,8 +134,8 @@ def apparent_adjust(min_temp: int, flags: set):
 
 def adjust_bucket_by_apparent(bucket_code: str, min_temp: int, flags: set):
     apparent, adj = apparent_adjust(min_temp, flags)
-    # ±1 단계 내에서만 조정
     idx = BUCKET_ORDER.index(bucket_code)
+    # ±1 단계 내 미세 조정
     if apparent < min_temp - 1:
         idx = max(0, idx - 1)
     elif apparent > min_temp + 1:
@@ -152,43 +150,34 @@ def apply_sensitivity(bucket_code: str, cold_sensitivity: int):
         idx = min(len(BUCKET_ORDER)-1, idx + 1)  # 더 가볍게
     return BUCKET_ORDER[idx]
 
-# --------------- Delta comments -------------
+# -------------- Comments ----------------
 def delta_comment(delta: int, min_t: int, max_t: int):
     if delta >= 10:
-        base = "일교차가 큽니다! 겹쳐 입기 추천."
+        base = "일교차가 큽니다! 아침엔 따뜻하게, 낮엔 가볍게 — 겹쳐 입기 추천."
         if min_t >= 17:
             return base + " 낮에는 한 단계 가볍게 입어도 좋아요."
         return base
     elif delta >= 6:
-        return "낮엔 포근하고 아침·저녁은 선선해요. 얇은 겉옷을 챙기세요."
+        return "낮엔 포근하고 아침·저녁은 선선해요. 얇은 겉옷 챙기세요."
     else:
         return "일교차가 크지 않아 선택이 쉬워요."
 
-# --------------- Season comments ------------
-def season_comment(season: str):
-    return {
-        "spring": "봄: 꽃가루/일교차 주의, 가벼운 레이어 추천.",
-        "summer": "여름: 통풍·흡습속건 소재, 자외선 차단.",
-        "autumn": "가을: 건조·일교차, 레이어드에 좋습니다.",
-        "winter": "겨울: 보온/방풍 필수, 목·손 보호.",
-    }.get(season, "")
-
-# --------------- Weather comments -----------
 def weather_comments(flags: set):
     out = []
     if "rain" in flags:   out.append("비: 방수 겉옷·신발/우산 준비.")
     if "snow" in flags:   out.append("눈: 미끄럼 주의, 보온/방수 부츠.")
-    if "windy" in flags:  out.append("바람: 체감 낮아요. 목을 따뜻하게.")
-    if "humid" in flags:  out.append("습함: 통풍 좋은 소재로 쾌적하게.")
+    if "windy" in flags:  out.append("바람: 목도리나 머플러로 체감온도를 높이세요.")
+    if "cloudy" in flags: out.append("흐림: 햇볕이 약해 체감온도가 낮아 더 추울 수 있어요!")
+    if "humid" in flags:  out.append("습함: 통풍 잘 되는 소재로 쾌적하게.")
     if "dry" in flags:    out.append("건조: 보습/립밤 챙기세요.")
     if "uv_high" in flags:out.append("자외선 강함: 모자/선글라스/선크림.")
     return out
 
-# --------------- Recommender ----------------
+# -------------- Recommender -------------
 def recommend_outfit(min_t: int, max_t: int, season: str, flags: set, user_prefs=None):
     user_prefs = user_prefs or {}
     cold_sensitivity = int(user_prefs.get("cold_sensitivity", 0))
-    carry_pref = int(user_prefs.get("carry_preference", 0))
+    carry_pref = int(user_prefs.get("carry_preference", 1))  # 겉옷 휴대 기본 강화
 
     base_bucket = pick_bucket(min_t)
     adj_bucket, apparent_delta = adjust_bucket_by_apparent(base_bucket, min_t, flags)
@@ -196,19 +185,14 @@ def recommend_outfit(min_t: int, max_t: int, season: str, flags: set, user_prefs
 
     code, lo, hi, base, bottom, layers, acc, shoe, label = bucket_info(final_bucket)
 
-    # 메시지 구성 요소
     delta = max_t - min_t
     comments = []
-    # 일교차 코멘트
+
     dc = delta_comment(delta, min_t, max_t)
     if carry_pref == 1:
         dc = "겉옷 휴대 추천. " + dc
     comments.append(dc)
-    # 날씨 코멘트
     comments += weather_comments(flags)
-    # 계절 코멘트
-    sc = season_comment(season)
-    if sc: comments.append(sc)
 
     debug = {
         "bucket": code, "label": label,
@@ -227,7 +211,7 @@ def recommend_outfit(min_t: int, max_t: int, season: str, flags: set, user_prefs
         "debug": debug
     }
 
-# --------------- Slack ----------------------
+# --------------- Slack send --------------
 def post_blocks_to_slack(blocks, fallback=""):
     payload = {"mrkdwn": True, "text": fallback, "blocks": blocks}
     req = urllib.request.Request(
@@ -236,9 +220,9 @@ def post_blocks_to_slack(blocks, fallback=""):
     )
     urllib.request.urlopen(req)
 
-# ----------------- Main ---------------------
+# ------------------- Main ----------------
 def main():
-    # 주말 제외(토/일)
+    # 주말 스킵
     if dt.date.today().weekday() >= 5:
         print("Weekend skip")
         return
@@ -253,18 +237,17 @@ def main():
     cond_emoji = cond.split(" ")[0] if " " in cond else ""
     cond_text  = cond.split(" ", 1)[1] if " " in cond else cond
 
-    # 사용자 옵션(필요 시 GitHub Secrets/ENV에서 받아도 됨)
     user_prefs = {
-        "cold_sensitivity": 0,   # -2 ~ +2
-        "carry_preference": 1,   # 1이면 겉옷 휴대 코멘트 강화
+        "cold_sensitivity": 0,  # -2 ~ +2
+        "carry_preference": 1,  # 겉옷 휴대 코멘트 강화
     }
 
     rec = recommend_outfit(w["tmin"], w["tmax"], season, flags, user_prefs)
 
-    # (포맷 유지) 인사 2줄
+    # 인사 2줄 (포맷 유지)
     intro = f"좋은 아침입니다! {cond_emoji}\n오늘의 서울 마포구 날씨를 알려드릴게요!"
 
-    # (포맷 유지) 필드 섹션
+    # 필드(포맷 유지)
     fields = [
         {"type":"mrkdwn", "text": "*최저*\n" + f"{w['tmin']}°C"},
         {"type":"mrkdwn", "text": "*최고*\n" + f"{w['tmax']}°C"},
@@ -274,14 +257,12 @@ def main():
     if round(w["rain"], 1) > 0:
         fields.append({"type":"mrkdwn", "text": "*강수량*\n" + f"{round(w['rain'],1)} mm"})
 
-    # (포맷 유지) 옷차림 섹션
+    # 옷차림 섹션 (포맷 유지)
     outfit_lines = [
         "*오늘의 옷차림 추천 👕*",
         f"상의 - {rec['top_text']}",
         f"하의 - {rec['bottom_text']}",
     ]
-
-    # 추가 팁: 레이어/액세서리/신발/코멘트 (1~3줄 내로 정리)
     tips = []
     if rec["layers"]:
         tips.append("레이어: " + ", ".join(rec["layers"]))
@@ -291,11 +272,9 @@ def main():
     if extra_items:
         tips.append("아이템: " + ", ".join(extra_items))
     if rec["comments"]:
-        # 가장 핵심 1~2개만 보여주고 나머지는 문장 병합
         core = rec["comments"][:2]
         others = rec["comments"][2:]
         tips.append("추가 팁: " + " / ".join(core + (others[:1] if others else [])))
-
     if tips:
         outfit_lines += tips
 
