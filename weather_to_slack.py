@@ -176,39 +176,32 @@ def build_outfit_recommendation(min_temp, max_temp, weathercode, precip_prob, wi
 # -----------------------------
 
 def build_slack_markdown(min_t, max_t, weather_text, precip_prob, top, bottom, tips):
-    # 인사 + 설명(2줄)
-    lines = []
-    lines.append("좋은 아침입니다! 🌤️")
-    lines.append("오늘의 서울 마포구 날씨를 알려드릴게요!")
-    lines.append("")  # 빈줄
+    # 1️⃣ 인사 + 설명
+    text = (
+        "좋은 아침입니다! ☀️\n"
+        "오늘의 서울 마포구 날씨를 알려드릴게요!\n\n"
+    )
 
-    # 정보 블록
-    lines.append("*최저*")
-    lines.append(f"{min_t}℃")
-    lines.append("")
-    lines.append("*날씨*")
-    lines.append(f"{weather_text}")
-    lines.append("")
-    lines.append("*최고*")
-    lines.append(f"{max_t}℃")
-    lines.append("")
-    lines.append("*강수확률*")
-    lines.append(f"{precip_prob}%")
-    lines.append("")
-    lines.append("—" * 20)
-    lines.append("")
+    # 2️⃣ 날씨 정보 (2x2 배치)
+    text += (
+        f"*최저* {min_t}℃   |   *최고* {max_t}℃\n"
+        f"*날씨* {weather_text}   |   *강수확률* {precip_prob}%\n\n"
+    )
 
-    # 옷차림
-    lines.append("*오늘의 옷차림 추천 👕*")
-    lines.append(f"상의 - {top}")
-    lines.append(f"하의 - {bottom}")
-    lines.append("")
+    # 3️⃣ 옷차림 추천
+    text += (
+        "──────────────────────────────\n"
+        f"*오늘의 옷차림 추천 👕*\n"
+        f"상의 - {top}\n"
+        f"하의 - {bottom}\n\n"
+    )
+
+    # 4️⃣ 추가 팁 (전구 위치 / 체크 표시 수정)
     if tips:
-        lines.append("*💡 추가 팁*")
-        for t in tips:
-            lines.append(f"☑️ {t}")
+        text += "*추가 팁 💡*\n"
+        text += "\n".join([f"✔️ {t}" for t in tips])
 
-    return "\n".join(lines)
+    return text
 
 # -----------------------------
 # Slack Webhook 전송
