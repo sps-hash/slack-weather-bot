@@ -257,9 +257,10 @@ def main():
     ]
 
     # 💡 추가 팁 (이모지 bullet ☑️)
-    if rec["comments"]:
-        comment_lines = "\n".join([f"☑️ {c}" for c in rec["comments"][:3]])
-        outfit_lines.append(f"💡 추가 팁\n{comment_lines}")
+if rec["comments"]:
+    comment_lines = "\n".join([f"☑️ {c}" for c in rec["comments"][:3]])
+    outfit_lines.append("")  # 하의 밑에 한 줄 띄우기
+    outfit_lines.append(f"*💡 추가 팁*\n{comment_lines}")
 
     blocks = [
         {"type":"section", "text":{"type":"mrkdwn", "text": intro}},
